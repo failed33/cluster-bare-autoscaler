@@ -12,9 +12,15 @@ spec:
       app: {{ include "cluster-bare-autoscaler.name" . }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         app: {{ include "cluster-bare-autoscaler.name" . }}
     spec:
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
       serviceAccountName: {{ .Values.serviceAccount.name }}
       tolerations:
         {{- toYaml .Values.tolerations | nindent 8 }}
@@ -23,13 +29,13 @@ spec:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
       containers:
         - name: autoscaler
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           args:
             - --config=/etc/autoscaler/config.yaml
-            {{- if .Values.dryRun }}
+            {{- if .Values.config.dryRun }}
             - --dry-run
             {{- end }}
           volumeMounts:
@@ -48,7 +54,6 @@ spec:
             httpGet:
               path: /readyz
               port: http
-          resources: {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             runAsUser: 65532
             runAsNonRoot: true
@@ -77,16 +82,20 @@ spec:
       labels:
         app: {{ include "cluster-bare-autoscaler.name" . }}-wol-agent
     spec:
+      nodeSelector:
+        {{- toYaml .Values.wolAgent.nodeSelector | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.wolAgent.affinity | nindent 8 }}
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       tolerations:
-        {{- toYaml .Values.tolerations | nindent 8 }}
-      priorityClassName: {{ .Values.priorityClassName }}
+        {{- toYaml .Values.wolAgent.tolerations | nindent 8 }}
+      priorityClassName: {{ .Values.wolAgent.priorityClassName }}
       imagePullSecrets:
-        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+        {{- toYaml .Values.wolAgent.imagePullSecrets | nindent 8 }}
       containers:
         - name: wol-agent
-          image: "{{ .Values.wolAgent.image.repository }}:{{ .Values.wolAgent.image.tag }}"
+          image: "{{ .Values.wolAgent.image.repository }}:{{ .Values.wolAgent.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.wolAgent.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.wolAgent.port }}

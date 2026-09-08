@@ -1,7 +1,17 @@
+{{- $config := deepCopy .Values.config -}}
+{{- $load := get $config "loadAverageStrategy" | default dict -}}
+{{- if not (get $load "namespace") -}}
+{{- $_ := set $load "namespace" .Release.Namespace -}}
+{{- end -}}
+{{- $_ := set $config "loadAverageStrategy" $load -}}
+{{- $shutdown := get $config "shutdownManager" | default dict -}}
+{{- $_ := set $config "shutdownManager" (merge $shutdown (dict "namespace" .Release.Namespace "port" .Values.shutdownDaemonset.port "podLabel" "app=cluster-bare-autoscaler-poweroff-manager")) -}}
+{{- $wol := get $config "wolAgent" | default dict -}}
+{{- $_ := set $config "wolAgent" (merge $wol (dict "namespace" .Release.Namespace "port" .Values.wolAgent.port "enabled" .Values.wolAgent.enabled "podLabel" "cluster-bare-autoscaler-wol-agent")) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "cluster-bare-autoscaler.fullname" . }}-config
 data:
   config.yaml: |
-{{ toYaml .Values.config | indent 4 }}
+{{ toYaml $config | indent 4 }}

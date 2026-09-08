@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: sysmetrics
-          image: "{{ .Values.metricsDaemonset.image.repository }}:{{ .Values.metricsDaemonset.image.tag }}"
+          image: "{{ .Values.metricsDaemonset.image.repository }}:{{ .Values.metricsDaemonset.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.metricsDaemonset.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.metricsDaemonset.port }}
@@ -68,7 +68,7 @@ spec:
     spec:
       containers:
         - name: poweroff-manager
-          image: "{{ .Values.shutdownDaemonset.image.repository }}:{{ .Values.shutdownDaemonset.image.tag }}"
+          image: "{{ .Values.shutdownDaemonset.image.repository }}:{{ .Values.shutdownDaemonset.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.shutdownDaemonset.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.shutdownDaemonset.port }}
@@ -90,7 +90,7 @@ spec:
       volumes:
         - name: shutdown-socket
           hostPath:
-            path: /run/cba-shutdown.sock
+            path: {{ .Values.shutdownDaemonset.socketActivationPath }}
             type: Socket
       priorityClassName: {{ .Values.shutdownDaemonset.priorityClassName }}
       imagePullSecrets:

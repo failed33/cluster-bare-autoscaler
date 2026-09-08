@@ -1,8 +1,8 @@
 replicaCount: 1
 
 image:
-  repository: docent/cluster-bare-autoscaler
-  tag: "0.8.1"
+  repository: ghcr.io/failed33/cluster-bare-autoscaler/controller
+  tag: "" # Defaults to the chart appVersion.
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -11,10 +11,13 @@ priorityClassName: "system-cluster-critical"
 resources:
   limits:
     cpu: 250m
-    memory: 32Mi
+    memory: 128Mi
   requests:
     cpu: 100m
-    memory: 16Mi
+    memory: 32Mi
+
+nodeSelector: {}
+affinity: {}
 
 tolerations:
   - key: "node-role.kubernetes.io/control-plane"
@@ -22,17 +25,17 @@ tolerations:
     effect: "NoSchedule"
 
 serviceAccount:
-  create: false
+  create: true
   name: cluster-bare-autoscaler
 
 rbac:
-  create: false
+  create: true
 
 metricsDaemonset:
   enabled: true
   image:
-    repository: docent/metrics-exporter
-    tag: "0.2.0"
+    repository: ghcr.io/failed33/cluster-bare-autoscaler/metrics-exporter
+    tag: "" # Defaults to the chart appVersion.
     pullPolicy: IfNotPresent
   port: 9100
   imagePullSecrets: []
@@ -55,11 +58,11 @@ metricsDaemonset:
                 operator: DoesNotExist
 
 shutdownDaemonset:
-  enabled: true
+  enabled: false
   port: 9101
   image:
-    repository: docent/poweroff-manager
-    tag: "0.4.0"
+    repository: ghcr.io/failed33/cluster-bare-autoscaler/poweroff-manager
+    tag: "" # Defaults to the chart appVersion.
     pullPolicy: IfNotPresent
   imagePullSecrets: []
   priorityClassName: "system-cluster-critical"
@@ -75,11 +78,13 @@ shutdownDaemonset:
   socketActivationPath: /run/cba-shutdown.sock
 
 wolAgent:
-  enabled: true
+  enabled: false
+  nodeSelector: {}
+  affinity: {}
   port: 9102
   image:
-    repository:  docent/wol-agent
-    tag: "0.2.0"
+    repository:  ghcr.io/failed33/cluster-bare-autoscaler/wol-agent
+    tag: "" # Defaults to the chart appVersion.
     pullPolicy: IfNotPresent
   imagePullSecrets: []
   priorityClassName: "system-cluster-critical"
@@ -98,28 +103,28 @@ config:
   logLevel: debug
   pollInterval: 10s
   cooldown: 5m
-  minNodes: 7
+  bootCooldown: 60m
+  shutdownMode: disabled
+  powerOnMode: disabled
+  minNodes: 0
   dryRun: true
   bootstrapCooldownSeconds: 10
   resourceBufferCPUPerc: 10
   resourceBufferMemoryPerc: 10
+  nodeLabels:
+    managed: cba.dev/is-managed
+    disabled: cba.dev/disabled
+  nodeAnnotations:
+    mac: cba.dev/mac-address
   ignoreLabels:
     node-role.kubernetes.io/control-plane: ""
   loadAverageStrategy:
     enabled: true
+    nodeThreshold: 0.2
     scaleDownThreshold: 0.5
     scaleUpThreshold: 0.75
     podLabel: "app=cluster-bare-autoscaler-sysmetrics"
     namespace: ""
     port: 9100
     timeoutSeconds: 3
-    clusterEvalMode: "p90" # p90 / average / median
-  nodes:
-  - name: node1
-    ip: 192.168.0.1
-  - name: node2
-    ip: 192.168.0.2
-  - name: node3
-    ip: 192.168.0.3
-  - name: node4
-    ip: 192.168.0.4
+    clusterEval: "p90" # p90 / average / median

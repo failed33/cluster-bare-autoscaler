@@ -3,6 +3,10 @@
 
 # Cluster Bare Autoscaler
 
+This fork publishes multi-platform images and an OCI Helm chart to GHCR.
+See [publishing and Flux installation](PUBLISHING.md). Autoscaler Go behavior
+is unchanged from upstream; this fork maintains release packaging and chart fixes.
+
 ![Cluster Bare Autoscaler logo](docs/images/cba.png)
 
 **Cluster Bare Autoscaler (CBA)** automatically adjusts the size of a bare-metal Kubernetes cluster by powering nodes off or on based on real-time resource usage, while safely cordoning and draining nodes before shutdown.

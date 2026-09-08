@@ -2,5 +2,8 @@ apiVersion: v2
 name: cluster-bare-autoscaler
 description: A bare-metal Kubernetes cluster autoscaler
 type: application
-version: 0.1.0
-appVersion: 0.8.1
+version: 0.8.5-fork.1
+appVersion: v0.8.5-fork.1
+home: https://github.com/failed33/cluster-bare-autoscaler
+sources:
+  - https://github.com/docent-net/cluster-bare-autoscaler
