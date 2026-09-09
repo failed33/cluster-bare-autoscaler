@@ -69,6 +69,11 @@ func PowerOnAndMarkBooted(ctx context.Context, node *NodeWrapper, cfg *config.Co
 		return fmt.Errorf("power on: %w", err)
 	}
 
+	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%s"}}}`, AnnotationBootedAt, time.Now().UTC().Format(time.RFC3339))
+	if _, err := client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("persist boot time: %w", err)
+	}
+
 	if err := UncordonNode(ctx, client, node.Name); err != nil {
 		slog.Warn("Failed to uncordon node", "node", node.Name, "err", err)
 		return err

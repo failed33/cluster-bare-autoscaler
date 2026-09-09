@@ -30,6 +30,7 @@ type Config struct {
 	MinNodes        int                  `yaml:"minNodes"`
 	Cooldown        time.Duration        `yaml:"cooldown"`
 	BootCooldown    time.Duration        `yaml:"bootCooldown"`
+	DrainTimeout    time.Duration        `yaml:"drainTimeout"`
 	PollInterval    time.Duration        `yaml:"pollInterval"`
 	IgnoreLabels    map[string]string    `yaml:"ignoreLabels"`
 	NodeLabels      NodeLabelConfig      `yaml:"nodeLabels"`
@@ -113,7 +114,12 @@ func (cfg *Config) ApplyDefaultsAndValidate() error {
 		return fmt.Errorf("macDiscoveryInterval too short: %s", cfg.MACDiscoveryInterval)
 	}
 
-	// Add more defaults/validations here later
+	if cfg.DrainTimeout == 0 {
+		cfg.DrainTimeout = 15 * time.Minute
+	}
+	if cfg.DrainTimeout < 0 {
+		return fmt.Errorf("drainTimeout must be positive")
+	}
 
 	return nil
 }

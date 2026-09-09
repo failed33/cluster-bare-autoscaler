@@ -2,6 +2,9 @@ package strategy
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/runtime"
+	kt "k8s.io/client-go/testing"
+	mv1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
@@ -30,7 +33,7 @@ func TestResourceAwareScaleDown_BlocksOnCPUOnly(t *testing.T) {
 				newPod("pod1", "1900m", "2Gi", "node1"),
 			}, nil
 		},
-		MetricsClient: fake.NewSimpleClientset(),
+		MetricsClient: idleMetrics(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -59,7 +62,7 @@ func TestResourceAwareScaleDown_BlocksOnMemoryOnly(t *testing.T) {
 				newPod("pod1", "500m", "1.9Gi", "node1"),
 			}, nil
 		},
-		MetricsClient: fake.NewSimpleClientset(),
+		MetricsClient: idleMetrics(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -88,7 +91,7 @@ func TestResourceAwareScaleDown_AllowsAtExactLimit(t *testing.T) {
 				newPod("pod1", "2000m", "2Gi", "node1"),
 			}, nil
 		},
-		MetricsClient: fake.NewSimpleClientset(),
+		MetricsClient: idleMetrics(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -118,7 +121,7 @@ func TestResourceAwareScaleDown_AllowsShutdownWhenPlentyOfBuffer(t *testing.T) {
 				newPod("pod2", "1000m", "1Gi", "node1"),
 			}, nil
 		},
-		MetricsClient: fake.NewSimpleClientset(),
+		MetricsClient: idleMetrics(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -148,7 +151,7 @@ func TestResourceAwareScaleDown_BlocksShutdownIfTooTight(t *testing.T) {
 				newPod("pod2", "500m", "500Mi", "node1"),
 			}, nil
 		},
-		MetricsClient: fake.NewSimpleClientset(),
+		MetricsClient: idleMetrics(),
 	}
 
 	ok, err := strat.ShouldScaleDown(context.Background(), "node2")
@@ -190,4 +193,15 @@ func newPod(name string, cpu string, mem string, nodeName string) v1.Pod {
 			},
 		},
 	}
+}
+
+func idleMetrics() *fake.Clientset {
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("list", "nodes", func(kt.Action) (bool, runtime.Object, error) {
+		return true, &mv1.NodeMetricsList{Items: []mv1.NodeMetrics{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node1"}, Usage: v1.ResourceList{}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "node2"}, Usage: v1.ResourceList{}},
+		}}, nil
+	})
+	return client
 }

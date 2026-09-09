@@ -79,8 +79,7 @@ func (u *ClusterLoadUtils) FetchClusterLoads(ctx context.Context, nodeNames []st
 	for _, name := range nodeNames {
 		load, err := u.FetchNormalizedLoad(ctx, name)
 		if err != nil {
-			slog.Warn("Skipping node due to error", "node", name, "err", err)
-			continue
+			return nil, nil, fmt.Errorf("incomplete cluster load metrics for %s: %w", name, err)
 		}
 		loads = append(loads, load)
 		nodeToLoad[name] = load

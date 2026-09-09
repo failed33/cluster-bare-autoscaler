@@ -226,6 +226,9 @@ func RecoverUnexpectedlyBootedNodes(ctx context.Context, client kubernetes.Inter
 			continue
 		}
 
+		if since, ok := PoweredOffSince(node); ok && time.Since(since) < 2*time.Minute {
+			continue
+		}
 		slog.Info("Recovering unexpectedly booted node", "node", node.Name)
 
 		if dryRun {
@@ -255,7 +258,7 @@ func RecoverUnexpectedlyBootedNodes(ctx context.Context, client kubernetes.Inter
 		}
 
 		// Step 2: Remove powered-off annotation
-		patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":null}}}`, AnnotationPoweredOff)
+		patch := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":null,"%s":"%s"}}}`, AnnotationPoweredOff, AnnotationBootedAt, time.Now().UTC().Format(time.RFC3339))
 		_, err = client.CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patch, metav1.PatchOptions{})
 		if err != nil {
 			slog.Warn("Failed to clear powered-off annotation", "node", node.Name, "err", err)

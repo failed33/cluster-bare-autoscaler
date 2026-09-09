@@ -9,6 +9,7 @@ import (
 const (
 	// Rotation / power state
 	AnnotationPoweredOff = "cba.dev/was-powered-off"
+	AnnotationBootedAt   = "cba.dev/booted-at"
 
 	// MAC addresses
 	AnnotationMACAuto   = "cba.dev/mac-address"          // default auto-discovered MAC

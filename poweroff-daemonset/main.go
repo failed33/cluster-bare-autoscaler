@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,26 +10,50 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 const shutdownSocket = "/run/cba-shutdown.sock"
 
-func shutdownHandler(w http.ResponseWriter, r *http.Request) {
-	go func() {
-		log.Println("Received shutdown request, sending to systemd socket...")
-
-		conn, err := net.Dial("unix", shutdownSocket)
-		if err != nil {
-			log.Printf("Failed to dial systemd socket: %v", err)
-			return
+func sendShutdown(ctx context.Context, socket string) error {
+	conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "unix", socket)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("Closing shutdown socket: %v", err)
 		}
-		defer conn.Close()
-
-		_, _ = conn.Write([]byte("shutdown\n"))
 	}()
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(conn, "shutdown"); err != nil {
+		return err
+	}
+	reply, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if reply != "accepted\n" {
+		return fmt.Errorf("shutdown rejected: %q", reply)
+	}
+	return nil
+}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "Shutdown signal sent via systemd socket")
+func shutdownHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := sendShutdown(r.Context(), shutdownSocket); err != nil {
+		log.Printf("Shutdown not accepted: %v", err)
+		http.Error(w, "host shutdown request failed", http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := fmt.Fprintln(w, "Host accepted shutdown"); err != nil {
+		log.Printf("Writing shutdown acknowledgement: %v", err)
+	}
 }
 
 func findMainInterfaceAndMAC() (string, string, error) {

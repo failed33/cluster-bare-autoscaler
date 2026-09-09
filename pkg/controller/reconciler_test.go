@@ -97,8 +97,9 @@ func TestCordonAndDrain_EvictionFails(t *testing.T) {
 		},
 		&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "mypod",
-				Namespace: "default",
+				Name:            "mypod",
+				OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "owner", Controller: func() *bool { b := true; return &b }()}},
+				Namespace:       "default",
 			},
 			Spec: v1.PodSpec{
 				NodeName: "node1",
@@ -167,7 +168,7 @@ func TestCordonAndDrain_SkipsMirrorAndDaemonSet(t *testing.T) {
 				Name:      "ds-pod",
 				Namespace: "default",
 				OwnerReferences: []metav1.OwnerReference{{
-					Kind: "DaemonSet",
+					Kind: "DaemonSet", Controller: func() *bool { b := true; return &b }(),
 					Name: "ds-owner",
 				}},
 			},
@@ -754,9 +755,10 @@ func TestCordonAndDrain_Success(t *testing.T) {
 			// Normal pod (should be evicted)
 			evictMe := &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "evict-me",
-					Namespace: "default",
-					UID:       "evictme-uid",
+					Name:            "evict-me",
+					OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "owner", Controller: func() *bool { b := true; return &b }()}},
+					Namespace:       "default",
+					UID:             "evictme-uid",
 				},
 				Spec: v1.PodSpec{
 					NodeName: nodeName,
@@ -801,6 +803,7 @@ func TestCordonAndDrain_Success(t *testing.T) {
 				obj := action.(k8stesting.CreateAction).GetObject()
 				if e, ok := obj.(*policyv1.Eviction); ok {
 					evictedPods = append(evictedPods, e.Name)
+					require.NoError(t, client.Tracker().Delete(v1.SchemeGroupVersion.WithResource("pods"), e.Namespace, e.Name))
 					return true, nil, nil
 				}
 				return false, nil, nil
@@ -987,7 +990,7 @@ func (s *alwaysAllowStrategy) Name() string { return "allow-all" }
 
 // --- the actual test ---
 
-func TestMaybeScaleDown_AnnotatePatchError_AllowsShutdownAndMarksState(t *testing.T) {
+func TestMaybeScaleDown_AnnotatePatchError_AbortsShutdown(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -1035,13 +1038,13 @@ func TestMaybeScaleDown_AnnotatePatchError_AllowsShutdownAndMarksState(t *testin
 	wrapped := nodeops.NewNodeWrapper(nodeObj, state, time.Now(), nodeops.NodeAnnotationConfig{}, cfg.IgnoreLabels)
 
 	ok := r.MaybeScaleDown(ctx, []*nodeops.NodeWrapper{wrapped})
-	require.True(t, ok, "scale-down should proceed even if annotation patch fails") // annotation error is warned-only. :contentReference[oaicite:1]{index=1}
+	require.False(t, ok, "shutdown requires persisted recovery state")
 
 	// Shutdown must have been called.
-	require.Equal(t, 1, sm.calls, "Shutdown should be invoked despite annotate error") // :contentReference[oaicite:2]{index=2}
+	require.Zero(t, sm.calls)
 
 	// State marked powered off (because not DryRun).
-	require.True(t, state.IsPoweredOff("node1"), "node should be marked powered-off in memory") // :contentReference[oaicite:3]{index=3}
+	require.False(t, state.IsPoweredOff("node1"))
 
 	// Annotation should NOT exist since PATCH failed.
 	got, err := client.CoreV1().Nodes().Get(ctx, "node1", metav1.GetOptions{})
@@ -1058,7 +1061,7 @@ func TestMaybeScaleDown_AnnotatePatchError_AllowsShutdownAndMarksState(t *testin
 		state,
 	)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"node1"}, offNames)
+	require.Empty(t, offNames)
 }
 
 func TestMaybeScaleDown_ShutdownError_ClearsAnnotation(t *testing.T) {

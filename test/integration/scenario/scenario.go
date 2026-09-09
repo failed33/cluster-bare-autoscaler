@@ -5,6 +5,8 @@ package scenario
 
 import (
 	"context"
+	kt "k8s.io/client-go/testing"
+	mv1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	"time"
 
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/config"
@@ -110,6 +112,18 @@ func MinimalConfig() *config.Config {
 
 func NewReconciler(cfg *config.Config, client *corefake.Clientset, sh *ShutdownRecorder, pwr *PowerOnRecorder) *controller.Reconciler {
 	mfake := metricsfake.NewSimpleClientset()
+	mfake.PrependReactor("list", "nodes", func(kt.Action) (bool, runtime.Object, error) {
+		nodes, err := client.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+		if err != nil {
+			return true, nil, err
+		}
+		result := &mv1.NodeMetricsList{}
+		for _, n := range nodes.Items {
+			result.Items = append(result.Items, mv1.NodeMetrics{ObjectMeta: metav1.ObjectMeta{Name: n.Name}, Usage: v1.ResourceList{}})
+		}
+		return true, result, nil
+	})
+
 	return controller.NewReconciler(
 		cfg,
 		client,

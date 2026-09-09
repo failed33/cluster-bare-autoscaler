@@ -49,6 +49,9 @@ func (n *NodeWrapper) IsInShutdownCooldown(duration time.Duration) bool {
 }
 
 func (n *NodeWrapper) IsInBootCooldown(duration time.Duration) bool {
+	if booted, err := time.Parse(time.RFC3339, n.Annotations[AnnotationBootedAt]); err == nil && n.Now.Sub(booted) < duration {
+		return true
+	}
 	return n.State != nil && n.State.IsBootCooldownActive(n.Name, n.Now, duration)
 }
 

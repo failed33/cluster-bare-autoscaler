@@ -33,6 +33,7 @@
 
           [Socket]
           ListenStream=/run/cba-shutdown.sock
+          Accept=yes
           SocketMode=0660
           SocketUser=root
           SocketGroup=cba
@@ -42,7 +43,7 @@
 
     - name: Create systemd service unit
       copy:
-        dest: /etc/systemd/system/cba-shutdown.service
+        dest: /etc/systemd/system/cba-shutdown@.service
         owner: root
         group: root
         mode: 0644
@@ -52,7 +53,11 @@
           Requires=cba-shutdown.socket
 
           [Service]
-          ExecStart=/usr/bin/systemctl poweroff
+          Type=oneshot
+          StandardOutput=socket
+          StandardError=journal
+          TimeoutStartSec=10s
+          ExecStart=/bin/sh -c 'read -r request && test "$request" = shutdown && /usr/bin/systemd-run --quiet --on-active=5s --timer-property=AccuracySec=1s --unit=cba-poweroff /usr/bin/systemctl poweroff && echo accepted'
           StandardInput=socket
           User=root
           Group=root

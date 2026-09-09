@@ -104,6 +104,7 @@ config:
   pollInterval: 10s
   cooldown: 5m
   bootCooldown: 60m
+  drainTimeout: 15m
   shutdownMode: disabled
   powerOnMode: disabled
   minNodes: 0

@@ -6,6 +6,8 @@ metadata:
   labels:
     app: {{ include "cluster-bare-autoscaler.name" . }}
 spec:
+  strategy:
+    type: Recreate
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
@@ -73,6 +75,8 @@ metadata:
   labels:
     app: {{ include "cluster-bare-autoscaler.name" . }}-wol-agent
 spec:
+  strategy:
+    type: Recreate
   replicas: 1
   selector:
     matchLabels:

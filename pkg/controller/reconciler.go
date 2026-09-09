@@ -2,20 +2,16 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/docent-net/cluster-bare-autoscaler/internal/bootstrap/metrics"
 	"github.com/docent-net/cluster-bare-autoscaler/pkg/nodeops"
-	"k8s.io/client-go/util/retry"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	"maps"
 
-	policyv1 "k8s.io/api/policy/v1"
 	"log/slog"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -161,6 +157,19 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if err := nodeops.RecoverUnexpectedlyBootedNodes(ctx, r.Client, r.Cfg, r.Cfg.DryRun); err != nil {
 		slog.Warn("Failed to recover unexpectedly booted nodes", "err", err)
 		return nil
+	}
+
+	// Manual boots recovered from annotations must also clear cached off state.
+	if !r.Cfg.DryRun {
+		nodes, err := r.listAllNodes(ctx)
+		if err != nil {
+			return err
+		}
+		for _, node := range nodes.Items {
+			if nodeops.IsNodeReady(&node) && node.Annotations[nodeops.AnnotationPoweredOff] == "" {
+				r.State.ClearPoweredOff(node.Name)
+			}
+		}
 	}
 
 	if r.Cfg.ForcePowerOnAllNodes {
@@ -334,37 +343,38 @@ func (r *Reconciler) MaybeScaleDown(ctx context.Context, eligible []*nodeops.Nod
 	}
 
 	slog.Info("Candidate for scale-down", "node", candidate.Name)
-	metrics.ScaleDowns.Inc()
-
+	if r.Cfg.DryRun {
+		return r.CordonAndDrain(ctx, candidate) == nil
+	}
+	// Abort without claiming the node is off if any prerequisite fails.
 	if err := r.CordonAndDrain(ctx, candidate); err != nil {
-		slog.Warn("CordonAndDrain failed", "node", candidate.Name, "err", err)
-		if err := nodeops.ClearPoweredOffAnnotation(ctx, r.Client, candidate.Name); err != nil {
-			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
-		}
+		slog.Warn("Drain aborted", "node", candidate.Name, "err", err)
+		r.restoreScheduling(ctx, candidate.Name)
 		return false
 	}
-
 	if err := r.AnnotatePoweredOffNode(ctx, candidate); err != nil {
-		slog.Warn("Failed to annotate powered-off node", "node", candidate.Name, "err", err)
+		slog.Error("Cannot persist shutdown state", "node", candidate.Name, "err", err)
+		r.restoreScheduling(ctx, candidate.Name)
+		return false
 	}
-
 	metrics.ShutdownAttempts.Inc()
-	if err := r.Shutdowner.Shutdown(ctx, candidate.Name); err != nil {
+	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := r.Shutdowner.Shutdown(shutdownCtx, candidate.Name); err != nil {
 		slog.Error("Shutdown failed", "node", candidate.Name, "err", err)
 		if err := nodeops.ClearPoweredOffAnnotation(ctx, r.Client, candidate.Name); err != nil {
-			slog.Warn("Failed to clear annotation from powered-off node", "node", candidate.Name, "err", err)
+			slog.Error("Cannot clear failed shutdown state", "err", err)
 		}
-	} else {
-		slog.Info("Shutdown initiated", "node", candidate.Name)
-		metrics.ShutdownSuccesses.Inc()
-		metrics.PoweredOffNodes.WithLabelValues(candidate.Name).Set(1)
-		r.State.MarkGlobalShutdown()
+		r.restoreScheduling(ctx, candidate.Name)
+		return false
 	}
-
-	if !r.Cfg.DryRun {
-		r.State.MarkShutdown(candidate.Name)
-		r.State.MarkPoweredOff(candidate.Name)
-	}
+	slog.Info("Shutdown accepted", "node", candidate.Name)
+	metrics.ScaleDowns.Inc()
+	metrics.ShutdownSuccesses.Inc()
+	metrics.PoweredOffNodes.WithLabelValues(candidate.Name).Set(1)
+	r.State.MarkGlobalShutdown()
+	r.State.MarkShutdown(candidate.Name)
+	r.State.MarkPoweredOff(candidate.Name)
 
 	return true
 }
@@ -386,73 +396,6 @@ func (r *Reconciler) PickScaleDownCandidate(eligible []*nodeops.NodeWrapper) *no
 		return nil
 	}
 	return eligible[len(eligible)-1]
-}
-
-func (r *Reconciler) CordonAndDrain(ctx context.Context, node *nodeops.NodeWrapper) error {
-	// Step 1: Cordon
-	if r.Cfg.DryRun {
-		slog.Info("Dry-run: would cordon node", "node", node.Name)
-	} else {
-		err := retry.OnError(retry.DefaultBackoff, apierrors.IsConflict, func() error {
-			latest, err := r.Client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			latestCopy := latest.DeepCopy()
-			latestCopy.Spec.Unschedulable = true
-			_, err = r.Client.CoreV1().Nodes().Update(ctx, latestCopy, metav1.UpdateOptions{})
-			return err
-		})
-		if err != nil {
-			slog.Error("Failed to cordon node after retries", "node", node.Name, "err", err)
-			return err
-		}
-		slog.Info("Node cordoned", "node", node.Name)
-	}
-
-	// Step 2: List pods on node
-	pods, err := r.Client.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		FieldSelector: "spec.nodeName=" + node.Name,
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, pod := range pods.Items {
-		// Skip mirror pods
-		if _, ok := pod.Annotations["kubernetes.io/config.mirror"]; ok {
-			slog.Info("Skipping mirror pod", "pod", pod.Name)
-			continue
-		}
-		// Skip DaemonSet pods
-		if ref := metav1.GetControllerOf(&pod); ref != nil && ref.Kind == "DaemonSet" {
-			slog.Info("Skipping DaemonSet pod", "pod", pod.Name)
-			continue
-		}
-
-		// Try eviction
-		eviction := &policyv1.Eviction{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      pod.Name,
-				Namespace: pod.Namespace,
-			},
-			DeleteOptions: &metav1.DeleteOptions{},
-		}
-
-		if r.Cfg.DryRun {
-			slog.Info("Dry-run: would evict pod", "pod", pod.Name, "ns", pod.Namespace)
-		} else {
-			err := r.Client.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
-			if err != nil {
-				slog.Warn("Eviction failed", "pod", pod.Name, "err", err)
-				return errors.New("aborting drain due to eviction failure")
-			}
-			slog.Info("Evicted pod", "pod", pod.Name, "ns", pod.Namespace)
-		}
-	}
-
-	slog.Info("Node drained successfully", "node", node.Name)
-	return nil
 }
 
 // MaybeRotate performs a maintenance rotation in two phases.

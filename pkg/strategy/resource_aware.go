@@ -41,6 +41,13 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 		usageMap[usage.Name] = usage.Usage
 	}
 
+	for _, node := range nodes {
+		if _, ok := usageMap[node.Name]; !ok {
+			slog.Warn("Missing resource metrics; refusing scale-down", "node", node.Name)
+			return false, nil
+		}
+	}
+
 	totalCPURequest, totalMemRequest := r.SumRequests(pods)
 	totalCPUUsage, totalMemUsage, clusterCPU, clusterMem, nodeCPU, nodeMem, usedCPU, usedMem := r.AnalyzeNodes(nodes, usageMap, nodeName)
 
@@ -48,7 +55,7 @@ func (r *ResourceAwareScaleDown) ShouldScaleDown(ctx context.Context, nodeName s
 	marginMem := clusterMem * int64(r.Cfg.ResourceBufferMemoryPerc) / 100
 
 	canScaleRequestOK := totalCPURequest+marginCPU <= clusterCPU && totalMemRequest+marginMem <= clusterMem
-	canScaleUsageOK := usedCPU+marginCPU <= clusterCPU && usedMem+marginMem <= clusterMem
+	canScaleUsageOK := totalCPUUsage+usedCPU+marginCPU <= clusterCPU && totalMemUsage+usedMem+marginMem <= clusterMem
 
 	slog.Info("Request-based scale-down check",
 		"canScaleRequestOK", canScaleRequestOK,

@@ -51,7 +51,11 @@ func (w *WakeOnLanController) PowerOn(ctx context.Context, node string, mac stri
 				slog.Info("Node became ready", "node", node)
 				return nil
 			}
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
 		}
 
 		slog.Warn("Node did not become ready after WOL attempt", "node", node, "attempt", attempt, "maxRetries", w.MaxRetries)
@@ -68,7 +72,9 @@ func (w *WakeOnLanController) sendWOLRequest(ctx context.Context, ip string, mac
 		return fmt.Errorf("creating WOL request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resp, err := http.DefaultClient.Do(req.WithContext(requestCtx))
 	if err != nil {
 		return fmt.Errorf("sending WOL request: %w", err)
 	}
